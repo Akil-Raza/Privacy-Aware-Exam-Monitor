@@ -1,0 +1,10 @@
+venv/
+venv_dashboard/
+__pycache__/
+*.pyc
+*.pt
+*.onnx
+data/events/
+data/metrics/
+*.db
+.env
