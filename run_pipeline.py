@@ -1,6 +1,7 @@
 """
 run_pipeline.py
-Full pipeline: capture -> perception -> detection -> anonymization -> rules -> logger.
+Full pipeline. Evidence overlays are drawn BEFORE logging, so saved
+snapshots include the boxes that justify the alert, not a plain blur.
 """
 import sys
 import os
@@ -40,7 +41,7 @@ def main():
             yaw = perception.head_pose.yaw if perception.head_pose else None
             events = rule_engine.update(yaw=yaw, num_faces=perception.num_faces, detections=detections)
             for event in events:
-                event_logger.log(event, anonymized)
+                event_logger.log(event, anonymized)  # now includes the boxes
 
             status = f"Faces: {perception.num_faces}"
             if yaw is not None:

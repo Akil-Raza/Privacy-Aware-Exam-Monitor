@@ -1,7 +1,5 @@
-# Core CV
 opencv-python==4.10.0.84
 mediapipe==0.10.14
 numpy==1.26.4
-
-# Object detection (Step 2d — install when we get there)
 ultralytics==8.2.100
+protobuf>=4.25.3,<5
