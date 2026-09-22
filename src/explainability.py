@@ -1,6 +1,7 @@
 """
 explainability.py
 Deterministic, proctor-readable explanation text per rule type.
+GAZE_AWAY now distinguishes head-turn vs eyes-only causes.
 """
 from typing import Dict
 
@@ -19,8 +20,12 @@ class ExplainabilityEngine:
 
     @staticmethod
     def _gaze_away(confidence, details):
-        yaw = details.get("yaw", 0.0)
         duration = details.get("duration_sec", 0.0)
+        reason = details.get("reason", "head_turn")
+        if reason == "eye_gaze":
+            zone = details.get("gaze_zone", "away from center")
+            return f"Student's eyes were directed {zone} (head remained forward) continuously for over {duration:.0f} seconds. Confidence: {confidence:.0%}."
+        yaw = details.get("yaw", 0.0)
         direction = "left" if yaw < 0 else "right"
         return f"Student's head was turned to the {direction} (yaw {abs(yaw):.0f} deg) continuously for over {duration:.0f} seconds. Confidence: {confidence:.0%}."
 

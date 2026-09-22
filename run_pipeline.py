@@ -1,6 +1,7 @@
 """
 run_pipeline.py
-Config-driven full pipeline with performance instrumentation.
+Config-driven full pipeline. Rule engine now receives BOTH head yaw and
+iris/pitch-based gaze zone, catching eyes-only looking-away too.
 """
 import sys
 import os
@@ -73,7 +74,8 @@ def main():
 
             t0 = time.perf_counter()
             yaw = perception.head_pose.yaw if perception.head_pose else None
-            events = rule_engine.update(yaw=yaw, num_faces=perception.num_faces, detections=detections)
+            gaze_zone = perception.gaze_zone.zone if perception.gaze_zone else None
+            events = rule_engine.update(yaw=yaw, gaze_zone=gaze_zone, num_faces=perception.num_faces, detections=detections)
             stage_times["rules"].append(time.perf_counter() - t0)
 
             for event in events:
@@ -83,6 +85,8 @@ def main():
             status = f"Faces: {perception.num_faces}"
             if yaw is not None:
                 status += f"  Yaw: {yaw:.1f}"
+            if gaze_zone:
+                status += f"  Gaze: {gaze_zone}"
             if frame_times[-1] > 0:
                 status += f"  FPS: {1.0 / frame_times[-1]:.1f}"
             cv2.putText(anonymized, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)

@@ -1,9 +1,7 @@
 """
 rules.py
-ProhibitedObjectRule now groups visually-similar labels (a small
-detector can flicker between labels for the SAME physical object,
-e.g. phone read as "laptop" one frame, "cell phone" the next) so one
-real appearance only ever fires one event.
+GazeAwayRule now considers EITHER head yaw OR gaze zone off-center,
+catching the case where the head stays forward but the eyes move.
 """
 import time
 from dataclasses import dataclass, field
@@ -26,20 +24,28 @@ class GazeAwayRule:
         self.duration_s = duration_s
         self._away_since = None
         self._fired = False
+        self._away_reason = None
 
-    def update(self, yaw: Optional[float]) -> Optional[RuleEvent]:
+    def update(self, yaw: Optional[float], gaze_zone: Optional[str] = None) -> Optional[RuleEvent]:
         now = time.time()
-        looking_away = yaw is not None and abs(yaw) > self.yaw_threshold
+        head_turned = yaw is not None and abs(yaw) > self.yaw_threshold
+        eyes_off = gaze_zone is not None and gaze_zone != "center"
+        looking_away = head_turned or eyes_off
+
         if not looking_away:
             self._away_since = None
             self._fired = False
+            self._away_reason = None
             return None
+
         if self._away_since is None:
             self._away_since = now
+            self._away_reason = "head_turn" if head_turned else "eye_gaze"
+
         elapsed = now - self._away_since
         if elapsed >= self.duration_s and not self._fired:
             self._fired = True
-            details = {"yaw": yaw, "duration_sec": self.duration_s}
+            details = {"yaw": yaw, "gaze_zone": gaze_zone, "reason": self._away_reason, "duration_sec": self.duration_s}
             confidence = min(1.0, elapsed / (self.duration_s * 2))
             return RuleEvent("GAZE_AWAY", ExplainabilityEngine.generate("GAZE_AWAY", confidence, details), confidence, now, details)
         return None
@@ -127,9 +133,9 @@ class RuleEngine:
             cooldown_s=cfg.get("object_cooldown_sec", 10.0),
         )
 
-    def update(self, *, yaw, num_faces, detections) -> List[RuleEvent]:
+    def update(self, *, yaw, gaze_zone, num_faces, detections) -> List[RuleEvent]:
         events = []
-        for event in (self.gaze_rule.update(yaw), self.faces_rule.update(num_faces), self.absence_rule.update(num_faces)):
+        for event in (self.gaze_rule.update(yaw, gaze_zone), self.faces_rule.update(num_faces), self.absence_rule.update(num_faces)):
             if event:
                 events.append(event)
         events.extend(self.object_rule.update(detections))
