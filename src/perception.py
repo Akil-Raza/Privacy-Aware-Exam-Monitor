@@ -1,6 +1,9 @@
 """
 perception.py
-Face landmarks + head-pose + iris-based gaze zone (left/right).
+Face landmarks + head-pose + hybrid gaze zone: iris dx for left/right
+(confirmed reliable), head pitch relative to a per-session calibrated
+baseline for up/down (iris dy alone could not separate "looking down"
+from resting eyelid occlusion in testing).
 """
 import cv2
 import mediapipe as mp
@@ -56,11 +59,14 @@ def _eye_offset(landmarks_px, iris_idx, corner_a, corner_b):
 
 
 class FaceAnalyzer:
-    def __init__(self, max_num_faces: int = 3):
+    def __init__(self, max_num_faces: int = 3, pitch_calibration_frames: int = 30):
         self._mesh = mp.solutions.face_mesh.FaceMesh(
             max_num_faces=max_num_faces, refine_landmarks=True,
             min_detection_confidence=0.5, min_tracking_confidence=0.5,
         )
+        self._pitch_calibration_frames = pitch_calibration_frames
+        self._pitch_samples = []
+        self._pitch_baseline = None
 
     def analyze(self, frame) -> PerceptionResult:
         h, w = frame.shape[:2]
@@ -75,25 +81,40 @@ class FaceAnalyzer:
         ]
         primary = all_face_landmarks_px[0]
         head_pose = self._estimate_head_pose(primary, w, h)
-        gaze_zone = self._estimate_gaze_zone(primary)
+        if head_pose is not None:
+            self._update_calibration(head_pose.pitch)
+        gaze_zone = self._estimate_gaze_zone(primary, head_pose)
         return PerceptionResult(len(all_face_landmarks_px), head_pose, gaze_zone, primary, all_face_landmarks_px)
 
-    def _estimate_gaze_zone(self, landmarks_px) -> Optional[GazeZone]:
+    def _update_calibration(self, pitch: float):
+        if self._pitch_baseline is not None:
+            return
+        self._pitch_samples.append(pitch)
+        if len(self._pitch_samples) >= self._pitch_calibration_frames:
+            self._pitch_baseline = float(np.mean(self._pitch_samples))
+
+    def _estimate_gaze_zone(self, landmarks_px, head_pose: Optional[HeadPose]) -> Optional[GazeZone]:
         try:
             dx1, dy1 = _eye_offset(landmarks_px, _LEFT_IRIS_CENTER, *_LEFT_EYE_CORNERS)
             dx2, dy2 = _eye_offset(landmarks_px, _RIGHT_IRIS_CENTER, *_RIGHT_EYE_CORNERS)
         except IndexError:
             return None
         dx, dy = (dx1 + dx2) / 2, (dy1 + dy2) / 2
-        zone = "center"
+
+        relative_pitch = None
+        if head_pose and self._pitch_baseline is not None:
+            relative_pitch = head_pose.pitch - self._pitch_baseline
+
         if dx < -0.15:
             zone = "left"
         elif dx > 0.15:
             zone = "right"
-        elif dy < -0.12:
-            zone = "up"
-        elif dy > 0.12:
+        elif relative_pitch is not None and relative_pitch > 8:
             zone = "down"
+        elif relative_pitch is not None and relative_pitch < -8:
+            zone = "up"
+        else:
+            zone = "center"
         return GazeZone(zone=zone, dx=dx, dy=dy)
 
     def _estimate_head_pose(self, landmarks_px, w, h) -> Optional[HeadPose]:
