@@ -1,6 +1,6 @@
 # Privacy-Aware Exam Integrity Monitor
 
-**Project code:** BAI-06 — T.Y. B.Sc. Artificial Intelligence, Semester V
+**Project code:** BAI-06 â€” T.Y. B.Sc. Artificial Intelligence, Semester V
 **Course:** KES Shroff College, AY 2026-27
 
 A locally-run exam proctoring prototype that detects integrity-risk behaviors
@@ -11,37 +11,10 @@ or a reviewer's screen.
 ## Why privacy-first, not privacy-added-later
 
 Nothing downstream of the anonymization step ever receives the raw camera
-frame — not the rule engine, not the event logger, not the dashboard. That
+frame â€” not the rule engine, not the event logger, not the dashboard. That
 boundary is enforced by what gets *passed between functions* in
 `run_pipeline.py`, not just described in a diagram. See "Architecture"
 below for exactly where that boundary sits.
-
-## Features
-
-- **Face-presence counting** and **multi-person detection** (MediaPipe Face Mesh)
-- **Head-pose (yaw/pitch/roll)** via 6-point `solvePnP`, with a correction
-  for a known pitch-ambiguity bug in that exact technique (see Limitations)
-- **Iris-based gaze-zone tracking** (left/right from iris position; up/down
-  from a per-session-calibrated head-pitch baseline, since iris vertical
-  movement is unreliable due to eyelid occlusion — see Limitations)
-- **Prohibited-object detection** (phone, laptop, book) via YOLOv8-nano,
-  with label-grouping so a detector flickering between similar labels for
-  one physical object doesn't inflate the event count
-- **Fail-closed anonymization** — if face tracking is lost, the system
-  blurs the *entire* frame rather than risk showing raw, identifiable video
-- **Temporal rule engine** — every rule requires a *sustained* condition
-  (not a single frame) before firing, to suppress false positives
-- **Event-level explainability** — every logged event includes a
-  deterministic, human-readable reason (`explainability.py`), not just a
-  confidence score
-- **Proctor dashboard** (Streamlit) — Confirm/Dismiss/Delete per event,
-  plus a manual retention policy control
-- **Config-driven thresholds** (`config.yaml`) — no hardcoded values buried
-  in code
-- **Performance instrumentation** — per-stage latency (perception/detection/
-  anonymization) and rolling FPS, exported to CSV
-- **Evaluation script** (`evaluate.py`) — turns dashboard review decisions
-  into false-positive-rate and false-alerts-per-hour metrics
 
 ## Architecture
 
@@ -52,19 +25,46 @@ Webcam
 -> privacy.py (RAW frame in -> ANONYMIZED frame OUT) <-- privacy boundary
 -> rules.py (numbers only: yaw, gaze zone, face count, labels)
 -> logger.py (ANONYMIZED frame + event JSON -> data/events/)
--> dashboard.py (reads data/events/ only — separate process)
+-> dashboard.py (reads data/events/ only â€” separate process)
 
 
 `perception.py` and `detection.py` both need the raw frame (they can't
-detect pixels they can't see) — but their *output* is just numbers and
+detect pixels they can't see) â€” but their *output* is just numbers and
 labels. `rules.py`, `logger.py`, and everything after never receive a raw
 frame, only what `privacy.py` already anonymized.
+
+## Features
+
+- **Face-presence counting** and **multi-person detection** (MediaPipe Face Mesh)
+- **Head-pose (yaw/pitch/roll)** via 6-point `solvePnP`, with a correction
+  for a known pitch-ambiguity bug in that exact technique (see Limitations)
+- **Iris-based gaze-zone tracking** (left/right from iris position; up/down
+  from a per-session-calibrated head-pitch baseline, since iris vertical
+  movement is unreliable due to eyelid occlusion â€” see Limitations)
+- **Prohibited-object detection** (phone, laptop, book) via YOLOv8-nano,
+  with label-grouping so a detector flickering between similar labels for
+  one physical object doesn't inflate the event count
+- **Fail-closed anonymization** â€” if face tracking is lost, the system
+  blurs the *entire* frame rather than risk showing raw, identifiable video
+- **Temporal rule engine** â€” every rule requires a *sustained* condition
+  (not a single frame) before firing, to suppress false positives
+- **Event-level explainability** â€” every logged event includes a
+  deterministic, human-readable reason (`explainability.py`), not just a
+  confidence score
+- **Proctor dashboard** (Streamlit) â€” Confirm/Dismiss/Delete per event,
+  plus a manual retention policy control
+- **Config-driven thresholds** (`config.yaml`) â€” no hardcoded values buried
+  in code
+- **Performance instrumentation** â€” per-stage latency (perception/detection/
+  anonymization) and rolling FPS, exported to CSV
+- **Evaluation script** (`evaluate.py`) â€” turns dashboard review decisions
+  into false-positive-rate and false-alerts-per-hour metrics
 
 ## Setup
 
 This project requires **two separate virtual environments**. `mediapipe`
 requires `protobuf<5`; `streamlit` requires `protobuf>=5.26.1`. These
-ranges cannot overlap in one environment — this isn't a version-pinning
+ranges cannot overlap in one environment â€” this isn't a version-pinning
 mistake, it's confirmed unresolvable, so the dashboard and the main
 pipeline are deliberately isolated processes that only communicate through
 `data/events/` on disk.
@@ -89,7 +89,7 @@ pip install streamlit
 
 ## Usage
 
-**Terminal 1 (main venv) — run the monitoring pipeline:**
+**Terminal 1 (main venv) â€” run the monitoring pipeline:**
 ```bash
 python run_pipeline.py
 ```
@@ -97,7 +97,7 @@ Opens a live preview window. Detected events are written to `data/events/`
 as JSON + an anonymized snapshot. Press `q` to stop; a performance summary
 is written to `data/metrics/performance_summary.csv` on exit.
 
-**Terminal 2 (dashboard venv) — review logged events:**
+**Terminal 2 (dashboard venv) â€” review logged events:**
 ```bash
 streamlit run dashboard.py
 ```
@@ -111,7 +111,7 @@ python evaluate.py --hours 0.5
 (`--hours` = duration of the test session being evaluated)
 
 All thresholds (gaze duration, confidence cutoffs, cooldowns, etc.) are in
-`config.yaml` — no code changes needed to retune the system.
+`config.yaml` â€” no code changes needed to retune the system.
 
 ## Project structure
 
@@ -143,7 +143,7 @@ All thresholds (gaze duration, confidence cutoffs, cooldowns, etc.) are in
 - **Iris vertical gaze is unreliable:** confirmed via testing that
   genuine "looking down" produces iris `dy` values indistinguishable from
   resting noise, due to eyelid occlusion. Up/down gaze uses head pitch
-  (relative to a per-session calibrated baseline) instead — iris `dx` is
+  (relative to a per-session calibrated baseline) instead â€” iris `dx` is
   used for left/right, where it proved reliable.
 - **Small-detector class confusion:** YOLOv8-nano occasionally
   misclassifies a phone as "laptop" (visually similar rectangular
@@ -163,7 +163,7 @@ All thresholds (gaze duration, confidence cutoffs, cooldowns, etc.) are in
 ## Acknowledgment
 
 An earlier prototype of this project exists in this repository's history
-under a different structure. That version had several unresolved issues —
+under a different structure. That version had several unresolved issues â€”
 a fail-open anonymization bug, a test that silently never ran due to
-incorrect indentation, and frame-rate-dependent rule timing — which were
+incorrect indentation, and frame-rate-dependent rule timing â€” which were
 identified during a review and avoided in this rebuild.
