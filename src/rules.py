@@ -1,6 +1,8 @@
 """
 rules.py
-Temporal rule engine: turns per-frame signals into sustained-duration events.
+Temporal rule engine. ProhibitedObjectRule now requires a TRUE sustained
+absence (cooldown) before re-firing, fixing duplicate-event inflation
+from single-frame detector flicker on a continuously-present object.
 """
 import time
 from dataclasses import dataclass
@@ -82,22 +84,26 @@ class ProlongedAbsenceRule:
 
 
 class ProhibitedObjectRule:
-    def __init__(self, watched_labels=("cell phone", "book"), min_confidence: float = 0.6):
+    def __init__(self, watched_labels=("cell phone", "book"), min_confidence: float = 0.6, cooldown_s: float = 10.0):
         self.watched_labels = set(watched_labels)
         self.min_confidence = min_confidence
+        self.cooldown_s = cooldown_s
+        self._last_seen = {}
         self._already_fired = set()
 
     def update(self, detections) -> List[RuleEvent]:
+        now = time.time()
         events = []
-        seen = set()
         for det in detections:
             if det.label not in self.watched_labels or det.confidence < self.min_confidence:
                 continue
-            seen.add(det.label)
+            self._last_seen[det.label] = now
             if det.label not in self._already_fired:
                 self._already_fired.add(det.label)
-                events.append(RuleEvent("PROHIBITED_OBJECT", f"{det.label} detected (confidence {det.confidence:.2f})", det.confidence, time.time()))
-        self._already_fired &= seen
+                events.append(RuleEvent("PROHIBITED_OBJECT", f"{det.label} detected (confidence {det.confidence:.2f})", det.confidence, now))
+        for label in list(self._already_fired):
+            if now - self._last_seen.get(label, 0) > self.cooldown_s:
+                self._already_fired.discard(label)
         return events
 
 
