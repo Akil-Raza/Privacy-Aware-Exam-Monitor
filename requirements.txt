@@ -3,3 +3,4 @@ mediapipe==0.10.14
 numpy==1.26.4
 ultralytics==8.2.100
 protobuf>=4.25.3,<5
+pyyaml==6.0.2

@@ -1,6 +1,6 @@
 """
 run_pipeline.py
-Full pipeline with per-stage performance instrumentation (FPS/latency).
+Config-driven full pipeline with performance instrumentation.
 """
 import sys
 import os
@@ -12,6 +12,7 @@ import csv
 import statistics as stats
 from collections import defaultdict
 
+from config import load_config
 from capture import FrameSource
 from perception import FaceAnalyzer
 from privacy import PrivacyGuard
@@ -30,12 +31,17 @@ def summarize(times):
 
 
 def main():
-    source = FrameSource(source=0, target_fps=10)
+    cfg = load_config()
+
+    source = FrameSource(source=cfg["capture"]["source"], target_fps=cfg["capture"]["target_fps"])
     analyzer = FaceAnalyzer(max_num_faces=3)
-    guard = PrivacyGuard(grace_frames=10)
-    detector = ObjectDetector(confidence_threshold=0.5)
-    rule_engine = RuleEngine()
-    event_logger = EventLogger(output_dir="data/events")
+    guard = PrivacyGuard(grace_frames=cfg["privacy"]["grace_frames"])
+    detector = ObjectDetector(
+        confidence_threshold=cfg["detection"]["confidence_threshold"],
+        class_overrides=cfg["detection"]["class_overrides"],
+    )
+    rule_engine = RuleEngine(cfg["rules"])
+    event_logger = EventLogger(output_dir=cfg["logging"]["output_dir"])
 
     stage_times = defaultdict(list)
     frame_times = []
@@ -74,7 +80,6 @@ def main():
                 event_logger.log(event, anonymized)
 
             frame_times.append(time.perf_counter() - frame_start)
-
             status = f"Faces: {perception.num_faces}"
             if yaw is not None:
                 status += f"  Yaw: {yaw:.1f}"

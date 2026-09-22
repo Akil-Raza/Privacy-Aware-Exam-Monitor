@@ -1,0 +1,22 @@
+capture:
+  source: 0
+  target_fps: 10
+
+privacy:
+  grace_frames: 10
+
+detection:
+  confidence_threshold: 0.5
+  class_overrides:
+    cell phone: 0.30
+
+rules:
+  gaze_yaw_threshold: 25.0
+  gaze_duration_sec: 5.0
+  multi_face_duration_sec: 3.0
+  absence_duration_sec: 8.0
+  object_min_confidence: 0.6
+  object_cooldown_sec: 10.0
+
+logging:
+  output_dir: data/events
