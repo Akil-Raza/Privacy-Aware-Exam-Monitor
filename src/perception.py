@@ -1,6 +1,6 @@
 """
 perception.py
-Face landmark detection + head-pose estimation (multi-face aware).
+Face landmarks + head-pose + iris-based gaze zone (left/right).
 """
 import cv2
 import mediapipe as mp
@@ -17,9 +17,17 @@ class HeadPose:
 
 
 @dataclass
+class GazeZone:
+    zone: str
+    dx: float
+    dy: float
+
+
+@dataclass
 class PerceptionResult:
     num_faces: int
     head_pose: Optional[HeadPose]
+    gaze_zone: Optional[GazeZone]
     primary_landmarks_px: Optional[List[Tuple[int, int]]]
     all_face_landmarks_px: List[List[Tuple[int, int]]]
 
@@ -29,14 +37,28 @@ _MODEL_POINTS_3D = np.array([
     (-225.0, 170.0, -135.0), (225.0, 170.0, -135.0),
     (-150.0, -150.0, -125.0), (150.0, -150.0, -125.0),
 ], dtype=np.float64)
-
 _LANDMARK_IDS = [1, 152, 33, 263, 61, 291]
+
+_LEFT_IRIS_CENTER = 468
+_LEFT_EYE_CORNERS = (33, 133)
+_RIGHT_IRIS_CENTER = 473
+_RIGHT_EYE_CORNERS = (362, 263)
+
+
+def _eye_offset(landmarks_px, iris_idx, corner_a, corner_b):
+    iris = landmarks_px[iris_idx]
+    a, b = landmarks_px[corner_a], landmarks_px[corner_b]
+    center_x, center_y = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+    eye_width = abs(a[0] - b[0])
+    if eye_width == 0:
+        return 0.0, 0.0
+    return (iris[0] - center_x) / eye_width, (iris[1] - center_y) / eye_width
 
 
 class FaceAnalyzer:
     def __init__(self, max_num_faces: int = 3):
         self._mesh = mp.solutions.face_mesh.FaceMesh(
-            max_num_faces=max_num_faces, refine_landmarks=False,
+            max_num_faces=max_num_faces, refine_landmarks=True,
             min_detection_confidence=0.5, min_tracking_confidence=0.5,
         )
 
@@ -45,7 +67,7 @@ class FaceAnalyzer:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self._mesh.process(rgb)
         if not results.multi_face_landmarks:
-            return PerceptionResult(0, None, None, [])
+            return PerceptionResult(0, None, None, None, [])
 
         all_face_landmarks_px = [
             [(int(lm.x * w), int(lm.y * h)) for lm in face.landmark]
@@ -53,7 +75,26 @@ class FaceAnalyzer:
         ]
         primary = all_face_landmarks_px[0]
         head_pose = self._estimate_head_pose(primary, w, h)
-        return PerceptionResult(len(all_face_landmarks_px), head_pose, primary, all_face_landmarks_px)
+        gaze_zone = self._estimate_gaze_zone(primary)
+        return PerceptionResult(len(all_face_landmarks_px), head_pose, gaze_zone, primary, all_face_landmarks_px)
+
+    def _estimate_gaze_zone(self, landmarks_px) -> Optional[GazeZone]:
+        try:
+            dx1, dy1 = _eye_offset(landmarks_px, _LEFT_IRIS_CENTER, *_LEFT_EYE_CORNERS)
+            dx2, dy2 = _eye_offset(landmarks_px, _RIGHT_IRIS_CENTER, *_RIGHT_EYE_CORNERS)
+        except IndexError:
+            return None
+        dx, dy = (dx1 + dx2) / 2, (dy1 + dy2) / 2
+        zone = "center"
+        if dx < -0.15:
+            zone = "left"
+        elif dx > 0.15:
+            zone = "right"
+        elif dy < -0.12:
+            zone = "up"
+        elif dy > 0.12:
+            zone = "down"
+        return GazeZone(zone=zone, dx=dx, dy=dy)
 
     def _estimate_head_pose(self, landmarks_px, w, h) -> Optional[HeadPose]:
         try:
@@ -64,14 +105,11 @@ class FaceAnalyzer:
         center = (w / 2, h / 2)
         camera_matrix = np.array([[focal_length, 0, center[0]], [0, focal_length, center[1]], [0, 0, 1]], dtype=np.float64)
         dist_coeffs = np.zeros((4, 1))
-        success, rotation_vec, _ = cv2.solvePnP(
-            _MODEL_POINTS_3D, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE,
-        )
+        success, rotation_vec, _ = cv2.solvePnP(_MODEL_POINTS_3D, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
         if not success:
             return None
         rotation_mat, _ = cv2.Rodrigues(rotation_vec)
         pitch, yaw, roll = self._rotation_matrix_to_euler(rotation_mat)
-        # 6-point model is near-planar: correct the known +/-180 pitch ambiguity.
         if pitch > 90:
             pitch -= 180
         elif pitch < -90:
@@ -94,23 +132,3 @@ class FaceAnalyzer:
 
     def close(self):
         self._mesh.close()
-
-
-if __name__ == "__main__":
-    from capture import FrameSource
-    source = FrameSource(source=0, target_fps=15)
-    analyzer = FaceAnalyzer(max_num_faces=3)
-    try:
-        for frame in source.frames():
-            result = analyzer.analyze(frame)
-            cv2.putText(frame, f"Faces: {result.num_faces}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            if result.head_pose:
-                hp = result.head_pose
-                cv2.putText(frame, f"Yaw:{hp.yaw:.1f} Pitch:{hp.pitch:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-            cv2.imshow("perception test", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-    finally:
-        analyzer.close()
-        source.release()
-        cv2.destroyAllWindows()
