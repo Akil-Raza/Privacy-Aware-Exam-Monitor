@@ -1,7 +1,9 @@
 """
 rules.py
-Config-driven temporal rule engine, using ExplainabilityEngine for
-proctor-facing text instead of ad-hoc f-strings per rule.
+ProhibitedObjectRule now groups visually-similar labels (a small
+detector can flicker between labels for the SAME physical object,
+e.g. phone read as "laptop" one frame, "cell phone" the next) so one
+real appearance only ever fires one event.
 """
 import time
 from dataclasses import dataclass, field
@@ -88,8 +90,8 @@ class ProlongedAbsenceRule:
 
 
 class ProhibitedObjectRule:
-    def __init__(self, watched_labels=("cell phone", "book"), min_confidence: float = 0.6, cooldown_s: float = 10.0):
-        self.watched_labels = set(watched_labels)
+    def __init__(self, label_groups=None, min_confidence: float = 0.6, cooldown_s: float = 10.0):
+        self.label_groups = label_groups or {"cell phone": "device", "laptop": "device", "book": "book"}
         self.min_confidence = min_confidence
         self.cooldown_s = cooldown_s
         self._last_seen = {}
@@ -99,16 +101,17 @@ class ProhibitedObjectRule:
         now = time.time()
         events = []
         for det in detections:
-            if det.label not in self.watched_labels or det.confidence < self.min_confidence:
+            group = self.label_groups.get(det.label)
+            if group is None or det.confidence < self.min_confidence:
                 continue
-            self._last_seen[det.label] = now
-            if det.label not in self._already_fired:
-                self._already_fired.add(det.label)
-                details = {"label": det.label}
+            self._last_seen[group] = now
+            if group not in self._already_fired:
+                self._already_fired.add(group)
+                details = {"label": det.label, "group": group}
                 events.append(RuleEvent("PROHIBITED_OBJECT", ExplainabilityEngine.generate("PROHIBITED_OBJECT", det.confidence, details), det.confidence, now, details))
-        for label in list(self._already_fired):
-            if now - self._last_seen.get(label, 0) > self.cooldown_s:
-                self._already_fired.discard(label)
+        for group in list(self._already_fired):
+            if now - self._last_seen.get(group, 0) > self.cooldown_s:
+                self._already_fired.discard(group)
         return events
 
 
@@ -119,6 +122,7 @@ class RuleEngine:
         self.faces_rule = MultipleFacesRule(cfg.get("multi_face_duration_sec", 3.0))
         self.absence_rule = ProlongedAbsenceRule(cfg.get("absence_duration_sec", 8.0))
         self.object_rule = ProhibitedObjectRule(
+            label_groups=cfg.get("label_groups", {"cell phone": "device", "laptop": "device", "book": "book"}),
             min_confidence=cfg.get("object_min_confidence", 0.6),
             cooldown_s=cfg.get("object_cooldown_sec", 10.0),
         )

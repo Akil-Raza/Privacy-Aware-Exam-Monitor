@@ -9,12 +9,17 @@ detection:
   confidence_threshold: 0.5
   class_overrides:
     cell phone: 0.30
+    laptop: 0.30
 
 rules:
   gaze_yaw_threshold: 25.0
   gaze_duration_sec: 5.0
   multi_face_duration_sec: 3.0
   absence_duration_sec: 8.0
+  label_groups:
+    cell phone: device
+    laptop: device
+    book: book
   object_min_confidence: 0.6
   object_cooldown_sec: 10.0
 
