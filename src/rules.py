@@ -1,7 +1,14 @@
 """
 rules.py
-GazeAwayRule now considers EITHER head yaw OR gaze zone off-center,
-catching the case where the head stays forward but the eyes move.
+Temporal rule engine. Every rule needs a SUSTAINED condition before firing.
+
+GazeAwayRule considers EITHER head yaw OR gaze zone off-center, catching
+the case where the head stays forward but the eyes move.
+
+The gaze, multiple-faces and absence rules tolerate very short dropouts
+(dropout_tolerance_sec). Real camera signals flicker: one frame where the
+second face is missed, or yaw dipping just under the threshold. Without a
+tolerance, a single bad frame reset the timer and the rule never fired.
 """
 import time
 from dataclasses import dataclass, field
@@ -18,11 +25,33 @@ class RuleEvent:
     details: Dict = field(default_factory=dict)
 
 
+class SustainedCondition:
+    """Measures how long a condition has been true, forgiving short dropouts."""
+
+    def __init__(self, tolerance_s: float = 1.0):
+        self.tolerance_s = tolerance_s
+        self.since = None
+        self.last_true = None
+
+    def update(self, active: bool, now: float) -> Optional[float]:
+        """Returns seconds the condition has held, or None if it is over."""
+        if active:
+            if self.since is None:
+                self.since = now
+            self.last_true = now
+            return now - self.since
+        if self.since is not None and now - self.last_true <= self.tolerance_s:
+            return now - self.since  # brief dropout, keep timing
+        self.since = None
+        self.last_true = None
+        return None
+
+
 class GazeAwayRule:
-    def __init__(self, yaw_threshold: float = 25.0, duration_s: float = 5.0):
+    def __init__(self, yaw_threshold: float = 25.0, duration_s: float = 5.0, tolerance_s: float = 1.0):
         self.yaw_threshold = yaw_threshold
         self.duration_s = duration_s
-        self._away_since = None
+        self._timer = SustainedCondition(tolerance_s)
         self._fired = False
         self._away_reason = None
 
@@ -32,18 +61,16 @@ class GazeAwayRule:
         eyes_off = gaze_zone is not None and gaze_zone != "center"
         looking_away = head_turned or eyes_off
 
-        if not looking_away:
-            self._away_since = None
+        was_idle = self._timer.since is None
+        elapsed = self._timer.update(looking_away, now)
+        if elapsed is None:
             self._fired = False
             self._away_reason = None
             return None
-
-        if self._away_since is None:
-            self._away_since = now
+        if was_idle:
             self._away_reason = "head_turn" if head_turned else "eye_gaze"
 
-        elapsed = now - self._away_since
-        if elapsed >= self.duration_s and not self._fired:
+        if looking_away and elapsed >= self.duration_s and not self._fired:
             self._fired = True
             details = {"yaw": yaw, "gaze_zone": gaze_zone, "reason": self._away_reason, "duration_sec": self.duration_s}
             confidence = min(1.0, elapsed / (self.duration_s * 2))
@@ -52,21 +79,18 @@ class GazeAwayRule:
 
 
 class MultipleFacesRule:
-    def __init__(self, duration_s: float = 3.0):
+    def __init__(self, duration_s: float = 3.0, tolerance_s: float = 1.0):
         self.duration_s = duration_s
-        self._since = None
+        self._timer = SustainedCondition(tolerance_s)
         self._fired = False
 
     def update(self, num_faces: int) -> Optional[RuleEvent]:
         now = time.time()
-        if num_faces <= 1:
-            self._since = None
+        elapsed = self._timer.update(num_faces >= 2, now)
+        if elapsed is None:
             self._fired = False
             return None
-        if self._since is None:
-            self._since = now
-        elapsed = now - self._since
-        if elapsed >= self.duration_s and not self._fired:
+        if num_faces >= 2 and elapsed >= self.duration_s and not self._fired:
             self._fired = True
             details = {"num_faces": num_faces, "duration_sec": self.duration_s}
             return RuleEvent("MULTIPLE_FACES", ExplainabilityEngine.generate("MULTIPLE_FACES", 0.9, details), 0.9, now, details)
@@ -74,21 +98,18 @@ class MultipleFacesRule:
 
 
 class ProlongedAbsenceRule:
-    def __init__(self, duration_s: float = 8.0):
+    def __init__(self, duration_s: float = 8.0, tolerance_s: float = 1.0):
         self.duration_s = duration_s
-        self._since = None
+        self._timer = SustainedCondition(tolerance_s)
         self._fired = False
 
     def update(self, num_faces: int) -> Optional[RuleEvent]:
         now = time.time()
-        if num_faces > 0:
-            self._since = None
+        elapsed = self._timer.update(num_faces == 0, now)
+        if elapsed is None:
             self._fired = False
             return None
-        if self._since is None:
-            self._since = now
-        elapsed = now - self._since
-        if elapsed >= self.duration_s and not self._fired:
+        if num_faces == 0 and elapsed >= self.duration_s and not self._fired:
             self._fired = True
             details = {"duration_sec": self.duration_s}
             return RuleEvent("PROLONGED_ABSENCE", ExplainabilityEngine.generate("PROLONGED_ABSENCE", 0.85, details), 0.85, now, details)
@@ -124,9 +145,10 @@ class ProhibitedObjectRule:
 class RuleEngine:
     def __init__(self, cfg: Optional[Dict] = None):
         cfg = cfg or {}
-        self.gaze_rule = GazeAwayRule(cfg.get("gaze_yaw_threshold", 25.0), cfg.get("gaze_duration_sec", 5.0))
-        self.faces_rule = MultipleFacesRule(cfg.get("multi_face_duration_sec", 3.0))
-        self.absence_rule = ProlongedAbsenceRule(cfg.get("absence_duration_sec", 8.0))
+        tol = cfg.get("dropout_tolerance_sec", 1.0)
+        self.gaze_rule = GazeAwayRule(cfg.get("gaze_yaw_threshold", 25.0), cfg.get("gaze_duration_sec", 5.0), tol)
+        self.faces_rule = MultipleFacesRule(cfg.get("multi_face_duration_sec", 3.0), tol)
+        self.absence_rule = ProlongedAbsenceRule(cfg.get("absence_duration_sec", 8.0), tol)
         self.object_rule = ProhibitedObjectRule(
             label_groups=cfg.get("label_groups", {"cell phone": "device", "laptop": "device", "book": "book"}),
             min_confidence=cfg.get("object_min_confidence", 0.6),
