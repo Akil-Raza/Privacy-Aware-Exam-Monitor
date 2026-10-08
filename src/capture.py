@@ -1,6 +1,6 @@
 """
 capture.py
-Step 2a — Local video capture module.
+Step 2a - Local video capture module.
 """
 import cv2
 import time
